@@ -65,7 +65,7 @@ const tradeLinks=[[0,.3,.27,.12,.19,.12],[.34,0,.30,.11,.16,.09],[.25,.35,0,.12,
 function chooseAIPolicy(i,old,q){const c=countries[i],r=old[i],t=aiStyles[i],p=basePolicy();
  const gap=r.growth-c.g,over=r.inflation-c.p,job=r.unemp-c.unemp;
  const player=old[S.me],link=tradeLinks[i][S.me],playerTariff=player.policy?.tariff||0;
- const borderPressure=playerTariff*link;const strategy=String(t.name);
+ const borderPressure=playerTariff*link+(.32*(S.bilateral?.[S.me]?.[i]||0));const strategy=String(t.name);
  // Policies are persistent but AI has limited adjustment speed, unlike instant best-response optimization.
  const rateTarget=clamp(t.rate*(.55*over+.17*gap),-2.5,2.5);
  const fiscalTarget=clamp(t.fiscal*(-.55*gap+.25*job)-.014*Math.max(0,r.debt-115),-2.4,3.5);
@@ -80,11 +80,32 @@ function chooseAIPolicy(i,old,q){const c=countries[i],r=old[i],t=aiStyles[i],p=b
  return {policy:p,rationale,strategy};
 }
 function aiDecisionLabel(p){const items=[];if(Math.abs(p.fiscal)>.25)items.push(p.fiscal>0?'财政扩张':'财政紧缩');if(Math.abs(p.rate)>.25)items.push(p.rate>0?'偏向加息':'偏向降息');if(p.tariff>=1)items.push('关税 '+fmt(p.tariff,0)+' 点');if(p.industry>=1)items.push('产业投资');return items.slice(0,2).join(' · ')||'维持现有政策'}
-function activeEvent(k,i,q){return S.globalEvents.reduce((a,e)=>a+(e.k===k&&(e.idx<0||e.idx===i)&&q>=e.q?Math.pow(.7,q-e.q):0),0)}
+function activeEvent(k,i,q){return S.globalEvents.reduce((a,e)=>a+(e.k===k&&(e.idx<0||e.idx===i)&&q>=e.q?(e.weight??1)*Math.pow(.7,q-e.q):0),0)}
+function recordNews(ev){S.news.unshift({q:S.q+1,title:ev.title,detail:ev.detail,tag:ev.tag||'架空情景'});S.news=S.news.slice(0,22);addLog((ev.tag||'架空情景')+'：'+ev.title)}
+function scheduleWorld(q){
+ for(const h of HISTORICAL_EVENTS.filter(e=>e.q===q)){S.globalEvents.push({...h});recordNews(h)}
+ // Branching uncertainty begins only in 2027, after the documented-history horizon.
+ if(q>=17&&q-S.lastFuture>=3&&rand()<.19){
+  const e=FUTURE_SCENARIOS[Math.floor(rand()*FUTURE_SCENARIOS.length)];
+  S.globalEvents.push({...e,q});recordNews({...e,q});S.lastFuture=q
+ }
+ if(q===10){S.bilateral[1][0]=8;S.bilateral[0][1]=5;S.bilateral[1][2]=2;addLog('贸易战：美国对中国增加示意性贸易壁垒，中国反制；数值不是实际税率')}
+ if(q===11){S.bilateral[1][0]=Math.max(0,S.bilateral[1][0]-3);S.bilateral[0][1]=Math.max(0,S.bilateral[0][1]-2);addLog('贸易缓和：中美双边附加壁垒部分回落')}
+ for(const order of S.tradeOrders){const i=order.from,j=order.to;
+  S.bilateral[i][j]=clamp(S.bilateral[i][j]+order.delta,0,30);
+  addLog(countries[i].name+(order.delta>0?'提高对':'降低对')+countries[j].name+'贸易壁垒 '+Math.abs(order.delta)+' 点');
+ }
+ S.tradeOrders=[];
+}
+function orderTrade(delta){const to=+($('tradeTarget')?.value??1);if(to===S.me)return;
+ S.tradeOrders.push({from:S.me,to,delta});$('tradeNotice').textContent='下季度执行：对 '+countries[to].name+(delta>0?'增加':'降低')+'壁垒 '+Math.abs(delta)+' 点';persist()}
+
 function simulate(){if(S.q>=80)return; // Always adopt current sliders, even if confirm was never clicked.
- updateSliderText(true);const old=S.regions.map(r=>({...r,policy:{...r.policy},pending:{...r.pending},components:{...r.components}}));const q=S.q+1;S.globalEvents.push(...S.pendingEvents);for(const e of S.pendingEvents)addLog('事件：'+eventDefs.find(x=>x.k===e.k).text+(e.idx<0?'（全球）':'（'+countries[e.idx].name+'）'));S.pendingEvents=[];
+ updateSliderText(true);const old=S.regions.map(r=>({...r,policy:{...r.policy},pending:{...r.pending},components:{...r.components}}));const q=S.q+1;S.globalEvents.push(...S.pendingEvents);scheduleWorld(q);for(const e of S.pendingEvents)addLog('事件：'+eventDefs.find(x=>x.k===e.k).text+(e.idx<0?'（全球）':'（'+countries[e.idx].name+'）'));S.pendingEvents=[];
  const avgGrowth=old.reduce((s,r)=>s+r.growth,0)/old.length;const avgRate=old.reduce((s,r)=>s+r.rate,0)/old.length;
  const decisions=old.map((r,i)=>i===S.me?null:chooseAIPolicy(i,old,q));
+ // Other governments may retaliate against directed tariffs with a lag, based on their trade exposure.
+ for(let i=0;i<6;i++){if(i===S.me)continue;const pressure=S.bilateral[S.me][i];if(pressure>2){const desired=clamp(.48*pressure,0,16);S.bilateral[i][S.me]=clamp(.82*S.bilateral[i][S.me]+.18*desired,0,30)}}
  S.aiDecisions=decisions.map((d,i)=>d?{i,policy:d.policy,rationale:d.rationale,strategy:d.strategy}:null).filter(Boolean);
  const f0=S.globalFinance||baseFinance(),us=old[1],usPolicy=S.me===1?old[1].pending:decisions[1].policy;
  const crash=activeEvent('wallstreet',1,q);
@@ -93,13 +114,16 @@ function simulate(){if(S.q>=80)return; // Always adopt current sliders, even if 
  const usdStrength=clamp(.72*f0.usd+.65*usPolicy.rate+.3*globalRisk-.12*(avgRate-countries[1].rate),-18,22);
  S.globalFinance={usd:usdStrength,stocks:clamp(f0.stocks*(1+stockMove/100),15,250),risk:globalRisk,stockMove};
  const next=[];for(let i=0;i<countries.length;i++){const c=countries[i],p=old[i],r={...p,components:{}};let policy={...p.pending};if(i!==S.me){policy={...decisions[i].policy};}const oil=activeEvent('oil',i,q), bank=activeEvent('bank',i,q),demand=activeEvent('demand',i,q),tech=activeEvent('tech',i,q),war=activeEvent('trade',i,q),boom=activeEvent('boom',i,q);
- const oilEffect=oil*c.energy*8;const policyRate=clamp(c.rate+.65*(p.rate-c.rate)+.35*policy.rate+.16*(p.inflation-c.p),.1,18);r.rate=policyRate;
+ const oilEffect=oil*c.energy*8;const historicalRate=(i===1?.42*activeEvent('fed',i,q)-.35*activeEvent('fedCut',i,q):i===3?.10*activeEvent('boj',i,q):0);
+ const policyRate=clamp(c.rate+.65*(p.rate-c.rate)+.35*policy.rate+.16*(p.inflation-c.p)+historicalRate,.01,18);r.rate=policyRate;
  r.bankStress=clamp(.67*p.bankStress+1.8*bank+.22*Math.max(0,policyRate-p.rate)+.12*Math.max(0,p.unemp-c.unemp),0,12);r.bankDefaults=clamp(.6*p.bankDefaults+.38*r.bankStress+.14*Math.max(0,p.unemp-c.unemp),0,15);
  r.bankCapital=clamp(p.bankCapital+.13*(12-p.bankCapital)+.10-.30*r.bankDefaults-.05*Math.max(0,p.credit-8),0,22);
  const financingDrag=dollarExposure[i]*(.32*globalRisk+.075*Math.max(0,usdStrength));const creditDelta=clamp(4-.85*(r.rate-c.rate)-.7*r.bankStress+.4*(r.bankCapital-10)-financingDrag,-12,13);r.credit=clamp(.55*p.credit+.45*creditDelta,-15,16);
  const partnerDemand=tradeLinks[i].reduce((sum,w,j)=>sum+w*(old[j].growth-countries[j].g),0);
  const partnerTariff=tradeLinks[i].reduce((sum,w,j)=>sum+w*(i===j?0:(decisions[j]?.policy.tariff??old[j].policy?.tariff??0)),0);
- const peerDemand=.27*partnerDemand+.16*boom-.55*war-.022*policy.tariff-.032*partnerTariff;
+ const incomingBilateral=tradeLinks[i].reduce((sum,w,j)=>sum+w*(S.bilateral[j][i]||0),0);
+ const importBarrier=tradeLinks[i].reduce((sum,w,j)=>sum+w*(S.bilateral[i][j]||0),0);
+ const peerDemand=.27*partnerDemand+.16*boom-.55*war-.022*policy.tariff-.032*partnerTariff-.075*incomingBilateral;
  r.fx=clamp(.75*p.fx+.23*(avgRate-r.rate)+.06*(c.p-p.inflation)+(i===1?0:.13*dollarExposure[i]*usdStrength),-25,25);
  r.consumption=clamp(.48*p.consumption+.52*(2.2+.34*(p.growth-c.g)-.21*(p.unemp-c.unemp)-.12*(r.rate-c.rate)-.10*policy.tax-.55*demand+.11*r.credit+.12*p.confidence),-12,18);
  r.investment=clamp(.5*p.investment+.5*(3.5+.32*r.credit-.38*(r.rate-c.rate)-.32*r.bankStress+.55*policy.industry+.65*tech),-17,19);
@@ -108,7 +132,7 @@ function simulate(){if(S.q>=80)return; // Always adopt current sliders, even if 
  const prodGain=.0035*policy.industry*prodRoom+.004*tech-.0025*(p.productivity-1)-.0006*Math.max(0,r.bankStress);
  r.productivity=clamp(p.productivity+prodGain,.7,1.55);
  // Growth contributions are additive deviations from the country-specific baseline, in annualized pp.
- const conC=.34*(r.consumption-2.2), invC=.25*(r.investment-3.5), fisC=.68*policy.fiscal-.25*policy.tax-.16*policy.industry, trC=.43*peerDemand+.013*r.fx-.022*policy.tariff, supC=.45*tech+18*(r.productivity-p.productivity)+.40*(r.productivity-1)-oilEffect;
+ const conC=.34*(r.consumption-2.2), invC=.25*(r.investment-3.5), fisC=.68*policy.fiscal-.25*policy.tax-.16*policy.industry, trC=.43*peerDemand+ .013*r.fx-.022*policy.tariff-.021*importBarrier, supC=.45*tech+18*(r.productivity-p.productivity)+.40*(r.productivity-1)-oilEffect;
  const finC=-dollarExposure[i]*(.095*globalRisk+.019*Math.max(0,usdStrength));const reversion=.44*(p.growth-c.g), noise=randShock();r.components={consumption:conC,investment:invC,fiscal:fisC,trade:trC,supply:supC,finance:finC,reversion:-reversion,noise};r.growth=clamp(c.g-reversion+conC+invC+fisC+trC+supC+finC+noise,-16,18);
  r.inflation=clamp(c.p+.65*(p.inflation-c.p)+.23*(r.growth-c.g)+.85*oilEffect+.045*policy.tariff-.28*tech-.10*(r.rate-c.rate),-5,25);
  r.unemp=clamp(p.unemp-.18*(p.unemp-c.unemp)-.20*(r.growth-c.g)+.07*r.bankStress+.025*Math.max(0,r.rate-c.rate),1,32);
