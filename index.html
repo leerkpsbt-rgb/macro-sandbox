@@ -26,7 +26,7 @@ function simulate(){if(S.q>=80)return;const old=S.regions.map(r=>({...r,policy:{
  }const oil=activeEvent('oil',i,q), bank=activeEvent('bank',i,q),demand=activeEvent('demand',i,q),tech=activeEvent('tech',i,q),war=activeEvent('trade',i,q),boom=activeEvent('boom',i,q);
  const oilEffect=oil*c.energy*8;const policyRate=clamp(c.rate+.65*(p.rate-c.rate)+policy.rate+.16*(p.inflation-c.p),.1,18);r.rate=policyRate;
  r.bankStress=clamp(.67*p.bankStress+1.8*bank+.22*Math.max(0,policyRate-p.rate)+.12*Math.max(0,p.unemp-c.unemp),0,12);r.bankDefaults=clamp(.6*p.bankDefaults+.38*r.bankStress+.14*Math.max(0,p.unemp-c.unemp),0,15);
- r.bankCapital=clamp(p.bankCapital+.22-(.32*r.bankDefaults)-.12*Math.max(0,p.credit-8),0,22);
+ r.bankCapital=clamp(p.bankCapital+.13*(12-p.bankCapital)+.10-.30*r.bankDefaults-.05*Math.max(0,p.credit-8),0,22);
  const creditDelta=clamp(4-.85*(r.rate-c.rate)-.7*r.bankStress+.4*(r.bankCapital-10),-12,13);r.credit=clamp(.55*p.credit+.45*creditDelta,-15,16);
  const peerDemand=.18*(avgGrowth-c.g)+.16*boom-.55*war-.02*(policy.tariff+p.policy.tariff);
  r.fx=clamp(.75*p.fx+.23*(avgRate-r.rate)+.06*(c.p-p.inflation),-25,25);
@@ -37,9 +37,9 @@ function simulate(){if(S.q>=80)return;const old=S.regions.map(r=>({...r,policy:{
  const conC=.34*(r.consumption-2.2), invC=.25*(r.investment-3.5), fisC=.68*policy.fiscal-.25*policy.tax-.16*policy.industry, trC=.43*peerDemand+.013*r.fx-.022*policy.tariff, supC=.65*tech+8*(r.productivity-1)-oilEffect;
  const reversion=.44*(p.growth-c.g), noise=randShock();r.components={consumption:conC,investment:invC,fiscal:fisC,trade:trC,supply:supC,reversion:-reversion,noise};r.growth=clamp(c.g-reversion+conC+invC+fisC+trC+supC+noise,-16,18);
  r.inflation=clamp(c.p+.65*(p.inflation-c.p)+.23*(r.growth-c.g)+.85*oilEffect+.045*policy.tariff-.28*tech-.10*(r.rate-c.rate),-5,25);
- r.unemp=clamp(p.unemp-.26*(r.growth-c.g)+.09*r.bankStress+.035*Math.max(0,r.rate-c.rate),1,32);
+ r.unemp=clamp(p.unemp-.18*(p.unemp-c.unemp)-.20*(r.growth-c.g)+.07*r.bankStress+.025*Math.max(0,r.rate-c.rate),1,32);
  r.fiscalBalance=clamp(-2-policy.fiscal-.30*policy.industry+.38*policy.tax-.15*Math.max(0,c.g-r.growth)-.055*Math.max(0,r.debt-70),-23,10);
- r.debt=clamp(p.debt+(Math.max(0,-r.fiscalBalance)*.65)+Math.max(0,r.rate-r.growth)*p.debt/450-.10*Math.max(0,r.growth-c.g),0,450);
+ r.debt=clamp(p.debt-r.fiscalBalance*.23+(r.rate-r.growth)*p.debt/900-.004*(p.debt-c.debt),0,450);
  r.outputIndex=clamp(p.outputIndex*(1+r.growth/400),1,100000);
  // Stylized stock variables, not a complete stock-flow consistent ledger.
  r.houseDeposits=clamp(p.houseDeposits+(.25*r.growth-.17*r.unemp+.12*policy.fiscal)-.11*policy.tax,0,500);
